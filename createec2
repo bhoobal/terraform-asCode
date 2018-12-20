@@ -1,0 +1,56 @@
+#!/bin/bash -ex
+# This script will create one or more EC2 instances in either 
+# Expects numerous environment variable to be in place.
+# Required values to be set:
+# USER
+# ENVIRONMENT
+# APP
+# COMPONENTS
+# NAME
+# TEAM
+# INSTANCE_TYPE
+
+USER=$1
+ENVIRONMENT=$2
+APP=$3
+NAME=$4
+TEAM=$5
+DESCRIPTION=$6
+POWER_ON_HOURS=$7
+
+if [[ -z "${USER}" ]] || [[ -z "${ENVIRONMENT}" ]] || [[ -z "${APP}" ]] || [[ -z "${NAME}" ]] || [[ -z "${TEAM}" ]]; then
+	echo
+	echo "Parameter Error: USER, ENVIRONMENT, APP, NAME, TEAM and INSTANCE_TYPE are all required parameters."
+    echo
+    exit 1
+fi
+
+# When copying the tfstate to S3, delineate by static -vs- feature
+if [[ $(echo "$ENVIRONMENT" | tr A-Z a-z) =~ alpha|beta|prod ]]; then
+  S3DIR="static/${ENVIRONMENT}"
+  TFVARS="${ENVIRONMENT}.tfvars"
+else
+  S3DIR="feature/${ENVIRONMENT}"
+  TFVARS="./Feature.tfvars"
+fi
+
+pushd profiles/${APP}
+
+terraform init
+terraform get
+# Each profile contains environment-specific tfvars files for Alpha+
+# Feature needs to use a reasonable set of defaults
+terraform apply -var-file=../../Global.tfvars \
+    -var-file=${TFVARS} \
+    -var "name=${NAME}" \
+    -var "environment=${ENVIRONMENT}" \
+    -var "user=${USER}" \
+    -var "app=${APP}" \
+    -var "team=${TEAM}" \
+    -var "poh=${POWER_ON_HOURS}" \
+    -var "description=${DESCRIPTION}" \
+    --auto-approve
+
+# ID=$(terraform show|grep 'id = i'|cut -f 2 -d '='|sed 's/ //')
+
+aws s3 cp terraform.tfstate s3://support/governance/ec2/${USER}/$(date +%Y%m%d)/$(uuidgen)
